@@ -3,13 +3,13 @@
 
 ## Overview
 
-The **User Onboarding System** is a microservices-based platform designed to manage user registration, authentication, and role-based access control. The system consists of three distinct microservices:
+The **User Onboarding System** is a microservices-based platform designed to manage user registration, authentication, and role-based access control. It consists of three key microservices:
 
 1. **User Management Service** – Handles user registration, password updates, user deletions, and role management.
 2. **Session Management Service** – Manages JWT session creation, role-based access control (RBAC), password expiry, and validates the user's security header.
-3. **OAuth Service** – Provides OAuth 2.0 authentication for external clients, allowing users to log in or register using external providers like Google and Facebook. The service also supports token exchange and user session management.
+3. **OAuth Service** – Provides OAuth 2.0 authentication for external clients, enabling users to log in or register via third-party providers like Google or Facebook.
 
-The system uses **JWT tokens** for user sessions and **PostgreSQL** as the database. Kubernetes will be used for container orchestration and deployment.
+The system uses **JWT tokens** for user sessions and **PostgreSQL** as the database. **Kubernetes** is used for container orchestration and deployment.
 
 ---
 
@@ -32,8 +32,7 @@ The system uses **JWT tokens** for user sessions and **PostgreSQL** as the datab
 
 ### 1. User Management Service
 - **Responsibilities**:
-  - User registration and deletion
-  - Password updates and validation
+  - User registration, password updates, and deletions
   - Role management (creating, updating, and assigning roles)
   - gRPC interface for suspending users based on inactivity
 - **Endpoints**:
@@ -69,67 +68,107 @@ The system uses **JWT tokens** for user sessions and **PostgreSQL** as the datab
 
 ## Database Schema
 
-### PostgreSQL
-- **Tables**:
-  - `users` - Stores user details (first name, last name, email, password, status, etc.)
-  - `roles` - Stores roles (ADMIN, USER, etc.)
-  - `role_resource_access` - Stores the resource-role mapping for access control.
-  - `sessions` - stores session-related data (like JWT tokens, expiration, and user details associated with the session).
+### PostgreSQL Tables
+- **`users`** - Stores user details (first name, last name, email, password, status, etc.)
+- **`roles`** - Stores roles (ADMIN, USER, etc.)
+- **`role_resource_access`** - Stores the resource-role mapping for access control.
+- **`sessions`** - Stores session-related data (like JWT tokens, expiration, and user details associated with the session).
 
 ### Database Initialization Jobs
-- **Kubernetes Job**: We’ll create a Kubernetes job to initialize the databases when deploying to the cluster, including setting up required tables and initial data.
+- **Kubernetes Job**: A Kubernetes job will apply Flyway migrations to initialize the database schema during deployment.
 
 ---
 
-## Deployment with Kubernetes
+## Local Development Setup
 
-This system is designed to be deployed in a **Kubernetes environment** with **internal PostgreSQL**. The setup ensures that each microservice is containerized and can be scaled independently.
+To run the application locally, you'll need to set up **PostgreSQL** with Docker and configure the Spring Boot application for local development.
 
-### Kubernetes Setup
-1. **Docker Containers**: Each microservice is built as a Docker image.
-2. **Kubernetes**: We use Kubernetes to manage the deployment, scaling, and orchestration of the services.
-3. **PostgreSQL**: A PostgreSQL instance is deployed as an internal service within Kubernetes, and the connection strings are passed securely via Kubernetes secrets.
+### Step 1: Set Up PostgreSQL with Docker
 
-### Deployment Process
-1. **Clone the Repository**:
-    ```bash
-    git clone https://github.com/yourusername/user-onboarding-system.git
-    cd user-onboarding-system
-    ```
+1. **Pull the PostgreSQL Docker Image**:
+   Run the following command to pull the PostgreSQL image:
+   ```bash
+   docker pull postgres:latest
+   ```
 
-2. **Build Docker Images**:
-    For each microservice, use Docker to build images:
-    ```bash
-    docker build -t user-management-service .
-    docker build -t session-management-service .
-    docker build -t oauth-service .
-    ```
+2. **Run PostgreSQL in Docker**:
+   Run the following command to start a PostgreSQL container with a custom database, username, and password:
+   ```bash
+   docker run --name postgres-container -e POSTGRES_DB=user_onboarding_system -e POSTGRES_USER=yourusername -e POSTGRES_PASSWORD=yourpassword -p 5432:5432 -d postgres:latest
+   ```
+  - Replace `yourusername` and `yourpassword` with your desired PostgreSQL username and password.
+  - The database `user_onboarding_system` will be created automatically.
 
-3. **Configure Kubernetes**: Create necessary **Kubernetes configuration files** (`deployment.yaml`, `service.yaml`, etc.) for each service.
+3. **Verify the PostgreSQL Container**:
+   To verify if the container is running, use:
+   ```bash
+   docker ps
+   ```
+   This should show the PostgreSQL container running, mapped to port `5432`.
+
+### Step 2: Configure Spring Boot Application
+
+1. **Edit `application.properties`**:
+   In your Spring Boot project, configure the database connection in `src/main/resources/application.properties`:
+   ```properties
+   spring.datasource.url=jdbc:postgresql://localhost:5432/user_onboarding_system
+   spring.datasource.username=yourusername
+   spring.datasource.password=yourpassword
+   spring.datasource.driver-class-name=org.postgresql.Driver
+   spring.jpa.hibernate.ddl-auto=none  # Use Flyway for schema creation
+   spring.flyway.enabled=true           # Enable Flyway migration
+   spring.flyway.locations=classpath:db/migration  # Location of migration scripts
+   ```
+
+### Step 3: Set Up Flyway Migrations
+
+1. **Create Migration Scripts**:
+   Create a folder `db/migration` in `src/main/resources`. Inside it, create SQL migration files like `V1__Create_tables.sql` to initialize the database schema.
+
+   Example `V1__Create_tables.sql`:
+   ```sql
+   CREATE TABLE IF NOT EXISTS users (
+       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+       first_name VARCHAR(255),
+       last_name VARCHAR(255),
+       email VARCHAR(255) UNIQUE NOT NULL,
+       password VARCHAR(255) NOT NULL,
+       status VARCHAR(50) DEFAULT 'REGISTERED',
+       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+   );
    
-4. **Run Kubernetes Job**: To initialize the PostgreSQL database, we will configure a Kubernetes **job** to run the database migrations (using `Flyway` or `Liquibase`).
+   CREATE TABLE IF NOT EXISTS roles (
+       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+       name VARCHAR(50) NOT NULL UNIQUE,
+       description TEXT
+   );
+   ```
 
-    Example:
-    ```bash
-    kubectl apply -f k8s/init-db-job.yaml
-    ```
+2. **Flyway Migration**:
+   When you run the Spring Boot application, Flyway will automatically run the migrations and apply them to the PostgreSQL database.
 
-5. **Deploy the System**:
-    ```bash
-    kubectl apply -f k8s/deployment.yaml
-    kubectl apply -f k8s/service.yaml
-    kubectl apply -f k8s/ingress.yaml
-    ```
+### Step 4: Run the Spring Boot Application
+
+1. **Run the Application**:
+   In your terminal, use:
+   ```bash
+   mvn spring-boot:run
+   ```
+
+2. **Verify Database**:
+   After running the application, verify the tables were created in PostgreSQL using **psql** or **pgAdmin**.
 
 ---
 
 ## API Documentation
 
-- The API is documented using **Swagger** and **OpenAPI** specifications.
-- After deployment, you can access the API documentation at:
-    ```bash
-    http://localhost:8080/swagger-ui.html
-    ```
+Once the application is running, you can access the API documentation at:
+```bash
+http://localhost:8080/swagger-ui.html
+```
+
+The API is documented using **Swagger** and **OpenAPI** specifications.
 
 ---
 
